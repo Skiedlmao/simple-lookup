@@ -39,21 +39,20 @@ function Format-Tier {
     param(
         [Parameter(Mandatory = $true)]
         $TierValue,
-        
         [Parameter(Mandatory = $true)]
-        [bool]$IsRetired
+        [bool]$IsRetired,
+        [Parameter(Mandatory = $true)]
+        $Position
     )
     
-    if ($null -eq $TierValue) {
-        return "N/A"
-    }
+    if ($null -eq $TierValue) { return "N/A" }
     
-    $tierPrefix = if ($TierValue -ge 3) { "ht" } else { "lt" }
+    $prefix = if ($Position -eq 0) { "ht" } else { "lt" }
     
     if ($IsRetired) {
-        return "r$($tierPrefix)$TierValue"
+        return "r$($prefix)$TierValue"
     } else {
-        return "$($tierPrefix)$TierValue"
+        return "$($prefix)$TierValue"
     }
 }
 
@@ -61,7 +60,6 @@ function Show-Tiers {
     param(
         [Parameter(Mandatory = $true)]
         $TiersData,
-        
         [Parameter(Mandatory = $true)]
         [string]$PlayerName
     )
@@ -71,50 +69,53 @@ function Show-Tiers {
     Write-Host "====================================" -ForegroundColor Cyan
     Write-Host ""
     
-    $gameModeTable = @()
+    $modes = @()
     
-    foreach ($prop in $TiersData.PSObject.Properties) {
-        if ($prop.Name -in @('player', 'name', 'uuid')) { continue }
+    foreach ($p in $TiersData.PSObject.Properties) {
+        if ($p.Name -in @('player', 'name', 'uuid')) { continue }
         
-        $gameMode = $prop.Name
-        $data = $prop.Value
+        $mode = $p.Name
+        $data = $p.Value
         
         if ($data.PSObject.Properties.Name -contains 'tier') {
-            $currentTier = $data.tier
-            $peakTier = $data.peak_tier
-            if ($null -eq $peakTier) { $peakTier = $currentTier }
+            $cTier = $data.tier
+            $pTier = $data.peak_tier
+            if ($null -eq $pTier) { $pTier = $cTier }
+            
+            $pos = $data.pos
+            $peakPos = $data.peak_pos
+            if ($null -eq $peakPos) { $peakPos = $pos }
             
             $retired = $data.retired
             if ($null -eq $retired) { $retired = $false }
             
-            $gameModeTable += [PSCustomObject]@{
-                GameMode = $gameMode
-                CurrentTier = $currentTier
-                PeakTier = $peakTier
-                Position = $data.pos
-                PeakPosition = $data.peak_pos
+            $modes += [PSCustomObject]@{
+                Mode = $mode
+                CurrTier = $cTier
+                PeakTier = $pTier
+                Pos = $pos
+                PeakPos = $peakPos
                 Retired = $retired
-                Attained = $data.attained
-                FormattedPeakTier = Format-Tier -TierValue $peakTier -IsRetired $retired
+                Date = $data.attained
+                FormattedPeakTier = Format-Tier -TierValue $pTier -IsRetired $retired -Position $peakPos
+                FormattedCurrTier = Format-Tier -TierValue $cTier -IsRetired $retired -Position $pos
             }
         }
     }
     
-    $sortedGameModes = $gameModeTable | Sort-Object -Property @{Expression = "PeakTier"; Descending = $true}, GameMode
+    $sorted = $modes | Sort-Object -Property @{Expression = "PeakTier"; Descending = $true}, Mode
     
-    if ($sortedGameModes.Count -gt 0) {
+    if ($sorted.Count -gt 0) {
         Write-Host "GAME MODES BY PEAK TIER:" -ForegroundColor Yellow
         Write-Host ""
         
-        $sortedGameModes | ForEach-Object {
-            $gameModeDisplay = $_.GameMode.ToUpper()
-            $posInfo = if ($null -ne $_.Position) { "Pos #$($_.Position)" } else { "Pos N/A" }
-            $peakPosInfo = if ($null -ne $_.PeakPosition) { "Peak Pos #$($_.PeakPosition)" } else { "Peak Pos N/A" }
+        $sorted | ForEach-Object {
+            $modeDisplay = $_.Mode.ToUpper()
             
-            $attainedDate = if ($null -ne $_.Attained) {
+            $date = if ($null -ne $_.Date) {
                 try {
-                    $dateTime = [DateTimeOffset]::FromUnixTimeSeconds($_.Attained).LocalDateTime
-                    $dateTime.ToString("yyyy-MM-dd")
+                    $dt = [DateTimeOffset]::FromUnixTimeSeconds($_.Date).LocalDateTime
+                    $dt.ToString("yyyy-MM-dd")
                 } catch {
                     "Unknown Date"
                 }
@@ -122,26 +123,34 @@ function Show-Tiers {
                 "Unknown Date"
             }
             
-            Write-Host "▶ $gameModeDisplay" -ForegroundColor Magenta
+            Write-Host "▶ $modeDisplay" -ForegroundColor Magenta
             Write-Host "  Peak Tier: " -NoNewline -ForegroundColor Green
             
-            $tierColor = switch ($_.PeakTier) {
-                {$_ -ge 4} { "Cyan" }
-                {$_ -ge 3} { "Green" }
-                {$_ -ge 2} { "Yellow" }
+            $color = switch ($_.PeakTier) {
+                5 { "Magenta" }
+                4 { "Cyan" }
+                3 { "Green" }
+                2 { "Yellow" }
                 default { "Gray" }
             }
             
-            Write-Host $_.FormattedPeakTier -ForegroundColor $tierColor
+            Write-Host $_.FormattedPeakTier -ForegroundColor $color
             
-            if ($_.CurrentTier -ne $_.PeakTier) {
+            if ($_.CurrTier -ne $_.PeakTier) {
                 Write-Host "  Current Tier: " -NoNewline -ForegroundColor DarkGreen
-                $currentTierFormatted = Format-Tier -TierValue $_.CurrentTier -IsRetired $_.Retired
-                Write-Host $currentTierFormatted -ForegroundColor $tierColor
+                
+                $currColor = switch ($_.CurrTier) {
+                    5 { "Magenta" }
+                    4 { "Cyan" }
+                    3 { "Green" }
+                    2 { "Yellow" }
+                    default { "Gray" }
+                }
+                
+                Write-Host $_.FormattedCurrTier -ForegroundColor $currColor
             }
             
-            Write-Host "  $posInfo, $peakPosInfo" -ForegroundColor White
-            Write-Host "  Attained: $attainedDate" -ForegroundColor DarkGray
+            Write-Host "  Attained: $date" -ForegroundColor DarkGray
             Write-Host ""
         }
     } else {
@@ -165,6 +174,6 @@ $uuid = Get-MinecraftUUID -Username $PlayerIGN
 if ($uuid) {
     Write-Host "Found UUID: $uuid" -ForegroundColor Gray
     Write-Host "Retrieving MCTiers data..." -ForegroundColor Gray
-    $tiersData = Get-MCTiers -UUID $uuid
-    Show-Tiers -TiersData $tiersData -PlayerName $PlayerIGN
+    $data = Get-MCTiers -UUID $uuid
+    Show-Tiers -TiersData $data -PlayerName $PlayerIGN
 }
